@@ -1,0 +1,86 @@
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
+
+public class LoadBalancer {
+
+    private List<String> backendServers;
+    private int currentIndex = 0;
+
+    public LoadBalancer(List<String> backendServers) {
+        this.backendServers = backendServers;
+    }
+
+    public void start(int port) {
+        try (ServerSocket serverSocket = new ServerSocket(port)) {
+            System.out.println("Load Balancer started on port " + port);
+
+            while (true) {
+                Socket clientSocket = serverSocket.accept();
+                String backendServer = getNextBackendServer();
+                System.out.println("Routing request to backend server: " + backendServer);
+
+                try {
+                    Socket backendSocket = new Socket(backendServer, Integer.parseInt(backendServer));
+                    new RequestHandler(clientSocket, backendSocket).start();
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private synchronized String getNextBackendServer() {
+        String server = backendServers.get(currentIndex);
+        currentIndex = (currentIndex + 1) % backendServers.size();
+        return server;
+    }
+
+    public static void main(String[] args) {
+        List<String> backendServers = List.of("localhost:8081", "localhost:8082", "localhost:8083");
+        LoadBalancer loadBalancer = new LoadBalancer(backendServers);
+        loadBalancer.start(8888);
+    }
+}
+
+class RequestHandler extends Thread {
+
+    private Socket clientSocket;
+    private Socket backendSocket;
+
+    public RequestHandler(Socket clientSocket, Socket backendSocket) {
+        this.clientSocket = clientSocket;
+        this.backendSocket = backendSocket;
+    }
+
+    @Override
+    public void run() {
+        try {
+            // Read request from client
+            Scanner clientInput = new Scanner(clientSocket.getInputStream());
+            PrintWriter backendOutput = new PrintWriter(backendSocket.getOutputStream(), true);
+
+            while (clientInput.hasNextLine()) {
+                String line = clientInput.nextLine();
+                System.out.println("Received from client: " + line);
+
+                // Forward request to backend server
+                backendOutput.println(line);
+            }
+
+            // Close resources
+            clientInput.close();
+            backendOutput.close();
+            clientSocket.close();
+            backendSocket.close();
+
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
